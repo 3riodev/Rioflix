@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>RIOFLIX</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="content"><div class="skel skel-hero"></div></div>
+
+<script src="js/db.js"></script>
+<script src="js/i18n.js"></script>
+<script src="js/ui.js"></script>
+<script>
+const profile = bootPage(null);
+const params = new URLSearchParams(location.search);
+const titleId = params.get('id');
+
+if(profile){ setTimeout(render, 150); }
+
+function render(){
+  const tt = DB.getTitle(titleId);
+  const holder = document.getElementById('content');
+  if(!tt){ holder.innerHTML = `<div class="page-wrap">${errorStateHtml()}</div>`; return; }
+
+  const name = titleDisplayName(tt);
+  const desc = titleDisplayDesc(tt);
+  const inList = DB.isInMyList(tt.id);
+  const like = DB.getLikeState(tt.id);
+  const ratingData = DB.getRating(tt.id) || {overall:0, episodes:{}};
+
+  let playHref = `player.html?id=${tt.id}`;
+  let playLabel = t('play');
+  let firstSeason = null, firstEp = null;
+  if(tt.type==='series'){
+    const prog = DB.getProgress(tt.id);
+    firstSeason = tt.seasons[0].number;
+    firstEp = tt.seasons[0].episodes[0].number;
+    const s = prog ? prog.season : firstSeason;
+    const e = prog ? prog.episode : firstEp;
+    playHref += `&s=${s}&e=${e}`;
+    playLabel = `${t('play')} S${s} E${e}`;
+  }
+
+  holder.innerHTML = `
+    <div class="detail-hero" style="background-image:url('${tt.backdrop}')"></div>
+    <div class="detail-body">
+      <div class="detail-flex">
+        <img class="detail-poster" src="${tt.poster}" alt="${name}">
+        <div class="detail-info">
+          <h1 class="detail-title">${name}</h1>
+          <div class="detail-original">${tt.originalTitle||''} ${tt.originalTitle && tt.originalTitle!==name ? '· '+tt.year : ''}</div>
+          <div class="detail-meta">
+            <span>${tt.year}</span><span class="dot">•</span>
+            <span class="badge-age">${tt.ageRating}</span><span class="dot">•</span>
+            <span>&#9733; ${tt.rating}</span><span class="dot">•</span>
+            <span>${tt.runtime? tt.runtime+' min' : (totalEpisodesCount(tt)+' '+t('episodes'))}</span><span class="dot">•</span>
+            <span>${(tt.genres||[]).join(', ')}</span>
+          </div>
+          <p class="hero-desc" style="-webkit-line-clamp:4;">${desc}</p>
+          <div class="detail-actions">
+            <a class="btn btn-primary" href="${playHref}">&#9654; ${playLabel}</a>
+            <button class="btn btn-icon-only btn-secondary" title="${t('addToList')}" onclick="toggleListDetail(this)">${inList?'&#10003;':'&#65291;'}</button>
+            <button class="btn btn-icon-only btn-secondary" id="likeBtn" title="${t('like')}" onclick="likeDetail('like')" style="${like==='like'?'background:var(--ember);':''}">&#128077;</button>
+            <button class="btn btn-icon-only btn-secondary" id="dislikeBtn" title="${t('dislike')}" onclick="likeDetail('dislike')" style="${like==='dislike'?'background:var(--ember);':''}">&#128078;</button>
+            <button class="btn btn-icon-only btn-secondary" title="${t('addToFolder')}" onclick="openFolderPicker('${tt.id}')">&#128193;</button>
+            <button class="btn btn-icon-only btn-secondary" title="${t('share')}" onclick="shareTitle('${tt.id}')">&#128279;</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="rating-block">
+        <div>
+          <div class="rating-avg">${ratingData.overall?ratingData.overall.toFixed(0):'–'}<span style="font-size:14px;color:var(--muted);">/5</span></div>
+        </div>
+        <div>
+          <div style="font-size:12.5px;color:var(--muted);margin-bottom:6px;">${t('rateThis')}</div>
+          ${starsHtml('overall-'+tt.id, ratingData.overall, '')}
+        </div>
+      </div>
+
+      <div class="detail-facts">
+        <div><div class="fact-label">${t('cast')}</div><div class="fact-val">${(tt.cast||[]).join(', ')||'—'}</div></div>
+        <div><div class="fact-label">${tt.type==='series'?t('creator'):t('director')}</div><div class="fact-val">${tt.director||tt.creator||'—'}</div></div>
+        <div><div class="fact-label">${t('languages')}</div><div class="fact-val">${tt.language||'—'}</div></div>
+        <div><div class="fact-label">${t('subtitles')}</div><div class="fact-val">AR, EN, +11</div></div>
+      </div>
+
+      ${tt.type==='series' ? seriesSeasonsHtml(tt, ratingData) : ''}
+
+      <div class="section-title">${t('cast')}</div>
+      <div class="cast-scroll">
+        ${(tt.cast&&tt.cast.length?tt.cast:['—']).map(c=>`
+          <div class="cast-item"><div class="cast-avatar">${c.charAt(0)}</div><div class="cast-name">${c}</div></div>`).join('')}
+      </div>
+
+      <div id="similarHolder"></div>
+    </div>`;
+
+  window._starHandlers['overall-'+tt.id] = (val)=>{ DB.setRating(tt.id,val); document.querySelector('.rating-avg').innerHTML = val+'<span style="font-size:14px;color:var(--muted);">/5</span>'; };
+
+  if(tt.type==='series'){ renderEpisodes(tt.id, tt.seasons[0].number); }
+
+  const similarHolder = document.getElementById('similarHolder');
+  renderRow(similarHolder, t('moreLikeThis'), DB.getSimilar(tt));
+  renderFooter();
+}
+
+function seriesSeasonsHtml(tt, ratingData){
+  return `
+    <div class="section-title">${t('episodes')}</div>
+    <select class="season-select" id="seasonSelect" onchange="renderEpisodes('${tt.id}', this.value)">
+      ${tt.seasons.map(s=>`<option value="${s.number}">${t('season')} ${s.number}</option>`).join('')}
+    </select>
+    <div id="episodesHolder"></div>
+  `;
+}
+
+function renderEpisodes(titleId, seasonNum){
+  seasonNum = parseInt(seasonNum,10);
+  const tt = DB.getTitle(titleId);
+  const season = tt.seasons.find(s=>s.number===seasonNum);
+  const ratingData = DB.getRating(tt.id) || {episodes:{}};
+  const prog = DB.getProgress(tt.id);
+  const holder = document.getElementById('episodesHolder');
+  const lang = currentLang();
+  holder.innerHTML = season.episodes.map(ep=>{
+    const epName = (lang==='ar'&&ep.titleAr)?ep.titleAr:ep.title;
+    const epDesc = (lang==='ar'&&ep.descriptionAr)?ep.descriptionAr:ep.description;
+    let progressBar='';
+    if(prog && prog.season===seasonNum && prog.episode===ep.number && prog.duration){
+      const pct = Math.min(100,Math.round((prog.time/prog.duration)*100));
+      progressBar = `<div class="card-progress" style="position:relative;margin-top:4px;"><i style="width:${pct}%"></i></div>`;
+    }
+    const epRating = (ratingData.episodes||{})[ep.id];
+    return `
+    <div class="episode-row" onclick="location.href='player.html?id=${tt.id}&s=${seasonNum}&e=${ep.number}'">
+      <div class="episode-num">${ep.number}</div>
+      <div class="episode-thumb" style="background-image:url('${ep.thumbnail}');background-size:cover;background-position:center;"></div>
+      <div class="episode-info">
+        <div class="episode-title-row"><span class="t">${epName}</span><span style="color:var(--muted);font-size:12px;">${ep.runtime} min</span></div>
+        <div class="episode-desc">${epDesc||''}</div>
+        <div class="episode-meta">
+          <span>${ep.releaseDate||''}</span>
+          <span onclick="event.stopPropagation()">${starsHtml('ep-'+ep.id, epRating, 'sm')}</span>
+        </div>
+        ${progressBar}
+      </div>
+    </div>`;
+  }).join('');
+  season.episodes.forEach(ep=>{
+    window._starHandlers['ep-'+ep.id] = (val)=>{ DB.setEpisodeRating(tt.id, ep.id, val); };
+  });
+}
+
+function toggleListDetail(btn){
+  const now = DB.toggleMyList(titleId);
+  btn.innerHTML = now?'&#10003;':'&#65291;';
+  showToast(now?t('addToList'):t('removeFromList'));
+}
+function likeDetail(kind){
+  const current = DB.getLikeState(titleId);
+  const newVal = current===kind ? null : kind;
+  DB.setLike(titleId,newVal);
+  document.getElementById('likeBtn').style.background = newVal==='like' ? 'var(--ember)' : '';
+  document.getElementById('dislikeBtn').style.background = newVal==='dislike' ? 'var(--ember)' : '';
+}
+function shareTitle(id){
+  const url = location.origin + location.pathname.replace('title.html','') + (DB.getTitle(id).type==='movie'?'movie/':'series/') + id;
+  const shareUrl = location.origin + location.pathname.split('/').slice(0,-1).join('/') + '/title.html?id='+id;
+  navigator.clipboard && navigator.clipboard.writeText(shareUrl);
+  showToast(currentLang()==='ar' ? 'تم نسخ الرابط' : 'Link copied');
+}
+function openFolderPicker(id){
+  const folders = DB.getFolders();
+  openModal(`
+    <h2>${t('addToFolder')}</h2>
+    <div id="folderList">
+      ${folders.length? folders.map(f=>`
+        <label style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);">
+          <input type="checkbox" ${f.items.includes(id)?'checked':''} onchange="DB.toggleFolderItem('${f.id}','${id}')">
+          ${f.name} <span style="color:var(--muted2);font-size:12px;">(${f.items.length})</span>
+        </label>`).join('') : `<p style="color:var(--muted);font-size:13px;">${currentLang()==='ar'?'لا توجد ملفات بعد':'No folders yet'}</p>`}
+    </div>
+    <div class="field" style="margin-top:14px;">
+      <label>${t('folderName')}</label>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="newFolderName" placeholder="${t('folderName')}">
+        <button class="btn btn-primary btn-sm" onclick="createFolderAndAdd('${id}')">${t('createFolder')}</button>
+      </div>
+    </div>
+    <div class="modal-actions"><button class="btn btn-primary" onclick="closeModal()">${t('close')}</button></div>
+  `);
+}
+function createFolderAndAdd(id){
+  const name = document.getElementById('newFolderName').value.trim();
+  if(!name) return;
+  const f = DB.createFolder(name);
+  DB.toggleFolderItem(f.id, id);
+  closeModal();
+  showToast(currentLang()==='ar'?'تم الإنشاء والإضافة':'Created and added');
+}
+</script>
+</body>
+</html>

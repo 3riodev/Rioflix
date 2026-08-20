@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>RIOFLIX</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 fill=%22%230A0A0B%22/><text x=%2250%25%22 y=%2258%25%22 font-size=%2255%22 fill=%22%23FF5A2B%22 text-anchor=%22middle%22 font-family=%22sans-serif%22 font-weight=%22bold%22>R</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="splash">
+    <div class="splash-logo">RIOFLIX</div>
+  </div>
+  <script src="js/db.js"></script>
+  <script src="js/i18n.js"></script>
+  <script>
+    DB.init();
+    setTimeout(()=>{
+      const p = DB.getActiveProfile();
+      location.href = p ? 'home.html' : 'profiles.html';
+    }, 1300);
+  </script>
+</body>
+</html>

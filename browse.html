@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>RIOFLIX</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="page-wrap">
+  <h1 class="page-title" id="pageTitle"></h1>
+  <div class="filter-bar" id="filterBar"></div>
+  <div class="grid" id="grid"></div>
+</div>
+
+<script src="js/db.js"></script>
+<script src="js/i18n.js"></script>
+<script src="js/ui.js"></script>
+<script>
+const profile = bootPage(location.search.includes('series') ? 'series' : 'movies');
+const params = new URLSearchParams(location.search);
+let type = params.get('type') || 'movie';
+let activeGenre = 'all';
+let sortBy = 'popular';
+
+function render(){
+  document.getElementById('pageTitle').textContent = type==='movie' ? t('movies') : t('series');
+  const all = DB.getTitles().filter(x=>x.type===type);
+  const genres = new Set();
+  all.forEach(tt=>(tt.genres||[]).forEach(g=>genres.add(g)));
+
+  const filterBar = document.getElementById('filterBar');
+  filterBar.innerHTML = `<button class="pill ${activeGenre==='all'?'active':''}" onclick="setGenre('all')">${t('allCat')}</button>` +
+    [...genres].map(g=>`<button class="pill ${activeGenre===g?'active':''}" onclick="setGenre('${g}')">${g}</button>`).join('') +
+    `<select class="pill" onchange="setSort(this.value)">
+      <option value="popular">${currentLang()==='ar'?'الأكثر رواجًا':'Popular'}</option>
+      <option value="newest">${currentLang()==='ar'?'الأحدث':'Newest'}</option>
+      <option value="rating">${currentLang()==='ar'?'الأعلى تقييمًا':'Highest Rated'}</option>
+      <option value="az">A-Z</option>
+    </select>`;
+
+  let items = activeGenre==='all' ? all : all.filter(x=>(x.genres||[]).includes(activeGenre));
+  if(sortBy==='newest') items = [...items].sort((a,b)=>b.year-a.year);
+  else if(sortBy==='rating') items = [...items].sort((a,b)=>b.rating-a.rating);
+  else if(sortBy==='az') items = [...items].sort((a,b)=>titleDisplayName(a).localeCompare(titleDisplayName(b)));
+
+  const grid = document.getElementById('grid');
+  grid.innerHTML = items.length ? items.map(tt=>cardHtml(tt)).join('') : emptyStateHtml(t('noResults'), t('noResultsSub'));
+  renderFooter();
+}
+function setGenre(g){ activeGenre=g; render(); }
+function setSort(v){ sortBy=v; render(); }
+if(profile) render();
+</script>
+</body>
+</html>

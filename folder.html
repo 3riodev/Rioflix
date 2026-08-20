@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>RIOFLIX</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="page-wrap">
+  <div style="display:flex;justify-content:space-between;align-items:center;">
+    <h1 class="page-title" id="pageTitle"></h1>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-ghost btn-sm" onclick="renameFolder()" id="renameBtn"></button>
+      <button class="btn btn-ghost btn-sm" style="color:var(--danger);" onclick="deleteFolderNow()" id="deleteBtn"></button>
+    </div>
+  </div>
+  <div class="grid" id="grid" style="margin-top:20px;"></div>
+</div>
+<script src="js/db.js"></script>
+<script src="js/i18n.js"></script>
+<script src="js/ui.js"></script>
+<script>
+const profile = bootPage('mylist');
+const params = new URLSearchParams(location.search);
+const folderId = params.get('id');
+
+function render(){
+  const f = DB.getFolders().find(x=>x.id===folderId);
+  if(!f){ location.href='mylist.html'; return; }
+  document.getElementById('pageTitle').textContent = '\u{1F4C1} ' + f.name;
+  document.getElementById('renameBtn').textContent = t('edit');
+  document.getElementById('deleteBtn').textContent = t('delete');
+  const items = f.items.map(id=>DB.getTitle(id)).filter(Boolean);
+  document.getElementById('grid').innerHTML = items.length ? items.map(tt=>cardHtml(tt)).join('') : emptyStateHtml(t('myListEmpty'), t('myListEmptySub'));
+  renderFooter();
+}
+function renameFolder(){
+  const f = DB.getFolders().find(x=>x.id===folderId);
+  const name = prompt(t('folderName'), f.name);
+  if(name && name.trim()){
+    DB.updateActiveProfile(p=>{ const fo=p.folders.find(x=>x.id===folderId); if(fo) fo.name=name.trim(); });
+    render();
+  }
+}
+function deleteFolderNow(){
+  if(confirm(currentLang()==='ar'?'حذف هذا الملف؟':'Delete this folder?')){
+    DB.deleteFolder(folderId);
+    location.href='mylist.html';
+  }
+}
+if(profile) render();
+</script>
+</body>
+</html>

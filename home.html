@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>RIOFLIX</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="heroHolder"></div>
+<div class="rows-wrap" id="rowsHolder"></div>
+
+<script src="js/db.js"></script>
+<script src="js/i18n.js"></script>
+<script src="js/ui.js"></script>
+<script>
+const profile = bootPage('home');
+if(profile){
+  document.getElementById('heroHolder').innerHTML = heroSkeleton();
+  document.getElementById('rowsHolder').innerHTML = rowSkeleton()+rowSkeleton()+rowSkeleton();
+  setTimeout(renderHome, 220); // brief skeleton beat, mirrors real network latency
+}
+
+function renderHome(){
+  try{
+    const all = DB.getTitles();
+    if(!all.length){ document.getElementById('rowsHolder').innerHTML = errorStateHtml(); return; }
+
+    // Hero: prefer something in-progress, else a rotating pick
+    const cw = DB.getContinueWatchingList();
+    const heroTitle = (cw[0] && cw[0].title) || all[Math.floor(Date.now()/86400000) % all.length];
+    renderHero(heroTitle);
+
+    const rowsHolder = document.getElementById('rowsHolder');
+    rowsHolder.innerHTML='';
+
+    if(cw.length){
+      renderRow(rowsHolder, t('continueWatching'), cw.map(x=>x.title), {wide:false});
+    }
+
+    const rec = DB.getBecauseYouWatched();
+    if(rec){ renderRow(rowsHolder, `${t('becauseYouWatched')} ${titleDisplayName(rec.seedTitle)}`, rec.items); }
+
+    renderRow(rowsHolder, t('top10'), all.slice(0,10), {top10:true});
+    renderRow(rowsHolder, t('trendingNow'), shuffleCopy(all));
+    renderRow(rowsHolder, t('recommendedForYou'), DB.getRecommendations(12));
+    renderRow(rowsHolder, t('newOnRioflix'), [...all].sort((a,b)=>b.year-a.year));
+    renderRow(rowsHolder, t('popularMovies'), all.filter(x=>x.type==='movie'));
+    renderRow(rowsHolder, t('popularSeries'), all.filter(x=>x.type==='series'));
+
+    const genreSet = new Set();
+    all.forEach(tt=>(tt.genres||[]).forEach(g=>genreSet.add(g)));
+    genreSet.forEach(g=>{
+      const items = all.filter(tt=>(tt.genres||[]).includes(g));
+      if(items.length) renderRow(rowsHolder, g, items);
+    });
+
+    if(!rowsHolder.children.length){
+      rowsHolder.innerHTML = emptyStateHtml(t('noResults'), t('noResultsSub'));
+    }
+    renderFooter();
+  }catch(e){
+    console.error(e);
+    document.getElementById('rowsHolder').innerHTML = errorStateHtml();
+  }
+}
+
+function shuffleCopy(arr){ return [...arr].sort(()=>Math.random()-0.5); }
+
+function renderHero(tt){
+  const name = titleDisplayName(tt);
+  const desc = titleDisplayDesc(tt);
+  const prog = DB.getProgress(tt.id);
+  let playLabel = t('play');
+  let playHref = `player.html?id=${tt.id}`;
+  if(tt.type==='series'){
+    const s = prog ? prog.season : (tt.seasons[0]||{}).number;
+    const e = prog ? prog.episode : (tt.seasons[0].episodes[0]||{}).number;
+    playHref += `&s=${s}&e=${e}`;
+    playLabel = prog ? `${t('play')} ${t('watchedS_E',{s,e})}` : `${t('play')} S${s} E${e}`;
+  }
+  const inList = DB.isInMyList(tt.id);
+  document.getElementById('heroHolder').innerHTML = `
+    <div class="hero" style="background-image:url('${tt.backdrop}')">
+      <div class="hero-content">
+        <span class="hero-badge">RIOFLIX ${tt.type==='series'?t('series'):t('movies')}</span>
+        <h1 class="hero-title">${name}</h1>
+        <div class="hero-meta">
+          <span>${tt.year}</span><span class="dot">•</span>
+          <span class="badge-age">${tt.ageRating}</span><span class="dot">•</span>
+          <span>&#9733; ${tt.rating}</span><span class="dot">•</span>
+          <span>${(tt.genres||[]).slice(0,3).join(' / ')}</span>
+        </div>
+        <p class="hero-desc">${desc}</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="${playHref}">&#9654; ${playLabel}</a>
+          <button class="btn btn-secondary" onclick="event.preventDefault();quickToggleList(this,'${tt.id}')">${inList?'&#10003;':'&#65291;'} ${t('addToList')}</button>
+          <a class="btn btn-ghost" href="title.html?id=${tt.id}">&#9432; ${t('moreInfo')}</a>
+        </div>
+      </div>
+    </div>`;
+}
+</script>
+</body>
+</html>

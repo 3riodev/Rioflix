@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>RIOFLIX</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="page-wrap">
+  <h1 class="page-title" id="pageTitle"></h1>
+  <div class="filter-bar" id="tabBar"></div>
+  <div class="grid" id="grid"></div>
+
+  <div style="display:flex;justify-content:space-between;align-items:center;margin:44px 0 18px;">
+    <h2 class="page-title" style="font-size:24px;margin:0;" id="foldersTitle"></h2>
+    <button class="btn btn-secondary btn-sm" onclick="newFolder()" id="newFolderBtn"></button>
+  </div>
+  <div id="foldersGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;"></div>
+</div>
+
+<script src="js/db.js"></script>
+<script src="js/i18n.js"></script>
+<script src="js/ui.js"></script>
+<script>
+const profile = bootPage('mylist');
+let tab = 'all';
+
+function render(){
+  document.getElementById('pageTitle').textContent = t('myList');
+  document.getElementById('foldersTitle').textContent = t('myFolders');
+  document.getElementById('newFolderBtn').textContent = '+ ' + t('createFolder');
+
+  document.getElementById('tabBar').innerHTML = `
+    <button class="pill ${tab==='all'?'active':''}" onclick="setTab('all')">${t('allCat')}</button>
+    <button class="pill ${tab==='movie'?'active':''}" onclick="setTab('movie')">${t('movies')}</button>
+    <button class="pill ${tab==='series'?'active':''}" onclick="setTab('series')">${t('series')}</button>`;
+
+  const p = DB.getActiveProfile();
+  let items = (p.myList||[]).map(id=>DB.getTitle(id)).filter(Boolean);
+  if(tab!=='all') items = items.filter(x=>x.type===tab);
+
+  const grid = document.getElementById('grid');
+  grid.innerHTML = items.length ? items.map(tt=>cardHtml(tt)).join('') : emptyStateHtml(t('myListEmpty'), t('myListEmptySub'));
+
+  const folders = DB.getFolders();
+  const fg = document.getElementById('foldersGrid');
+  const noFoldersMsg = currentLang()==='ar' ? 'لم تُنشئ أي ملف بعد' : "You haven't created any folders yet";
+  fg.innerHTML = folders.length ? folders.map(f=>`
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:18px;cursor:pointer;" onclick="location.href='folder.html?id=${f.id}'">
+      <div style="font-size:16px;font-weight:700;margin-bottom:4px;">&#128193; ${f.name}</div>
+      <div style="color:var(--muted);font-size:13px;">${f.items.length} ${currentLang()==='ar'?'عنصر':'titles'}</div>
+    </div>`).join('') : `<p style="color:var(--muted);font-size:13.5px;">${noFoldersMsg}</p>`;
+
+  renderFooter();
+}
+function setTab(x){ tab=x; render(); }
+function newFolder(){
+  const name = prompt(t('folderName'));
+  if(name && name.trim()){ DB.createFolder(name.trim()); render(); }
+}
+if(profile) render();
+</script>
+</body>
+</html>

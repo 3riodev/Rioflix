@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>RIOFLIX — Admin</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="admin-shell">
+  <aside class="admin-side">
+    <a href="home.html" class="brand">RIOFLIX</a>
+    <nav class="admin-nav">
+      <a href="#" class="active" data-view="dashboard" onclick="setView('dashboard');return false;" id="nav-dashboard"></a>
+      <a href="#" data-view="movies" onclick="setView('movies');return false;" id="nav-movies"></a>
+      <a href="#" data-view="series" onclick="setView('series');return false;" id="nav-series"></a>
+      <a href="home.html" id="nav-back"></a>
+    </nav>
+  </aside>
+  <main class="admin-main" id="mainArea"></main>
+</div>
+
+<script src="js/db.js"></script>
+<script src="js/i18n.js"></script>
+<script src="js/ui.js"></script>
+<script>
+DB.init(); applyDirection();
+if(!DB.getActiveProfile()) location.href='profiles.html';
+
+let view = 'dashboard';
+function setView(v){ view=v; renderAll(); }
+
+function renderAll(){
+  document.getElementById('nav-dashboard').textContent = t('admin');
+  document.getElementById('nav-movies').textContent = t('movies');
+  document.getElementById('nav-series').textContent = t('series');
+  document.getElementById('nav-back').textContent = currentLang()==='ar' ? '\u2190 العودة للموقع' : '\u2190 Back to site';
+  document.querySelectorAll('.admin-nav a[data-view]').forEach(a=>a.classList.toggle('active', a.dataset.view===view));
+
+  const main = document.getElementById('mainArea');
+  if(view==='dashboard') main.innerHTML = dashboardHtml();
+  else main.innerHTML = tableHtml(view==='movies'?'movie':'series');
+}
+
+function dashboardHtml(){
+  const all = DB.getTitles();
+  const movies = all.filter(x=>x.type==='movie');
+  const series = all.filter(x=>x.type==='series');
+  const totalEp = series.reduce((s,x)=>s+totalEpisodesCount(x),0);
+  const profiles = DB.getProfiles();
+  return `
+    <h1 class="page-title" style="margin-bottom:24px;">${t('admin')}</h1>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="stat-num">${movies.length}</div><div class="stat-label">${t('totalMovies')}</div></div>
+      <div class="stat-card"><div class="stat-num">${series.length}</div><div class="stat-label">${t('totalSeries')}</div></div>
+      <div class="stat-card"><div class="stat-num">${series.reduce((s,x)=>s+x.seasons.length,0)}</div><div class="stat-label">${currentLang()==='ar'?'إجمالي المواسم':'Total Seasons'}</div></div>
+      <div class="stat-card"><div class="stat-num">${totalEp}</div><div class="stat-label">${t('totalEpisodes')}</div></div>
+      <div class="stat-card"><div class="stat-num">${profiles.length}</div><div class="stat-label">${currentLang()==='ar'?'إجمالي المستخدمين':'Total Users'}</div></div>
+    </div>
+    <div class="admin-toolbar"><h2 class="section-title" style="margin:0;">${currentLang()==='ar'?'أحدث الإضافات':'Recently Added'}</h2></div>
+    <table class="admin-table">
+      <thead><tr><th>${currentLang()==='ar'?'العنوان':'Title'}</th><th>${currentLang()==='ar'?'النوع':'Type'}</th><th>${t('year')}</th><th>&#9733;</th></tr></thead>
+      <tbody>${[...all].reverse().slice(0,8).map(tt=>`<tr><td>${titleDisplayName(tt)}</td><td>${tt.type}</td><td>${tt.year}</td><td>${tt.rating}</td></tr>`).join('')}</tbody>
+    </table>`;
+}
+
+function tableHtml(type){
+  const items = DB.getTitles().filter(x=>x.type===type);
+  return `
+    <div class="admin-toolbar">
+      <h1 class="page-title" style="margin:0;">${type==='movie'?t('movies'):t('series')}</h1>
+      <button class="btn btn-primary" onclick="openTitleForm(null,'${type}')">+ ${type==='movie'?t('addMovie'):t('addSeries')}</button>
+    </div>
+    <table class="admin-table">
+      <thead><tr><th>${currentLang()==='ar'?'العنوان':'Title'}</th><th>${t('year')}</th><th>${currentLang()==='ar'?'الأنواع':'Genres'}</th><th>${currentLang()==='ar'?'المصدر':'Source'}</th><th></th></tr></thead>
+      <tbody>
+        ${items.map(tt=>`<tr>
+          <td>${titleDisplayName(tt)}</td>
+          <td>${tt.year}</td>
+          <td>${(tt.genres||[]).join(', ')}</td>
+          <td>${type==='movie' ? (tt.source?tt.source.kind:'—') : totalEpisodesCount(tt)+' '+t('episodes')}</td>
+          <td class="row-actions">
+            <button class="link-btn" onclick="openTitleForm('${tt.id}','${type}')">${t('edit')}</button>
+            <button class="link-btn danger" onclick="deleteTitleConfirm('${tt.id}')">${t('delete')}</button>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+    ${!items.length ? emptyStateHtml(t('noResults'), '') : ''}`;
+}
+
+function deleteTitleConfirm(id){
+  if(confirm(currentLang()==='ar'?'حذف هذا العمل نهائيًا؟':'Delete this title permanently?')){
+    DB.deleteTitle(id);
+    renderAll();
+  }
+}
+
+// ---------------- Title Form (Add / Edit) ----------------
+const ALL_GENRES = ['Action','Adventure','Animation','Anime','Comedy','Crime','Documentary','Drama','Fantasy','Horror','Mystery','Romance','Sci-Fi','Thriller','Family','Kids','War','History','Music','Sport'];
+
+function blankTitle(type){
+  return { id:'t_'+Date.now(), type, title:'', titleAr:'', originalTitle:'', year:new Date().getFullYear(),
+    rating:0, ageRating:'PG-13', genres:[], country:'', language:'English', description:'', descriptionAr:'',
+    poster:'', backdrop:'', cast:[], director:'', creator:'', runtime:type==='movie'?90:null,
+    source: type==='movie' ? {kind:'iframe', url:'', subtitles:[]} : undefined,
+    seasons: type==='series' ? [{number:1, episodes:[]}] : undefined };
+}
+
+let formState = null;
+
+function openTitleForm(id, type){
+  formState = id ? JSON.parse(JSON.stringify(DB.getTitle(id))) : blankTitle(type);
+  renderForm();
+}
+
+function renderForm(){
+  const f = formState;
+  const isMovie = f.type==='movie';
+  openModalCustom(`
+    <h2>${isMovie ? t('addMovie') : t('addSeries')}</h2>
+    <div class="field-row">
+      <div class="field"><label>Title (EN)</label><input type="text" id="fld_title" value="${esc(f.title)}"></div>
+      <div class="field"><label>العنوان (AR)</label><input type="text" id="fld_titleAr" value="${esc(f.titleAr)}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>${t('year')}</label><input type="number" id="fld_year" value="${f.year}"></div>
+      <div class="field"><label>${t('ageRating')}</label>
+        <select id="fld_age">${['G','PG','PG-13','R','18+'].map(a=>`<option ${f.ageRating===a?'selected':''}>${a}</option>`).join('')}</select>
+      </div>
+      ${isMovie?`<div class="field"><label>${t('runtime')} (min)</label><input type="number" id="fld_runtime" value="${f.runtime||90}"></div>`:''}
+    </div>
+    <div class="field"><label>Description (EN)</label><textarea id="fld_desc">${esc(f.description)}</textarea></div>
+    <div class="field"><label>الوصف (AR)</label><textarea id="fld_descAr">${esc(f.descriptionAr)}</textarea></div>
+    <div class="field-row">
+      <div class="field"><label>Poster URL</label><input type="url" id="fld_poster" value="${esc(f.poster)}"></div>
+      <div class="field"><label>Backdrop URL</label><input type="url" id="fld_backdrop" value="${esc(f.backdrop)}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>${t('cast')} (comma separated)</label><input type="text" id="fld_cast" value="${esc((f.cast||[]).join(', '))}"></div>
+      <div class="field"><label>${isMovie?t('director'):t('creator')}</label><input type="text" id="fld_directorcreator" value="${esc(isMovie?(f.director||''):(f.creator||''))}"></div>
+    </div>
+    <div class="field"><label>${t('genres')}</label>
+      <div class="tag-list" id="genreTags">
+        ${ALL_GENRES.map(g=>`<span class="tag-check ${f.genres.includes(g)?'active':''}" onclick="toggleGenre('${g}',this)">${g}</span>`).join('')}
+      </div>
+    </div>
+    ${isMovie ? movieSourceHtml(f) : seriesSeasonsFormHtml(f)}
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">${t('cancel')}</button>
+      <button class="btn btn-primary" onclick="saveTitleForm()">${t('save')}</button>
+    </div>
+  `, true);
+}
+function esc(s){ return (s||'').toString().replace(/"/g,'&quot;'); }
+function toggleGenre(g, el){
+  const i = formState.genres.indexOf(g);
+  if(i>-1) formState.genres.splice(i,1); else formState.genres.push(g);
+  el.classList.toggle('active');
+}
+
+function movieSourceHtml(f){
+  const src = f.source || {kind:'iframe', url:''};
+  return `
+    <div class="field">
+      <label>${t('videoSource')}</label>
+      <div class="radio-group">
+        <div class="radio-opt ${src.kind==='iframe'?'active':''}" onclick="setSourceKind('iframe')">${t('embedIframe')}</div>
+        <div class="radio-opt ${src.kind==='video'?'active':''}" onclick="setSourceKind('video')">${t('directFile')}</div>
+      </div>
+      <div class="help-text" id="sourceHelp">${sourceHelpText(src.kind)}</div>
+      <input type="url" id="fld_sourceUrl" placeholder="${src.kind==='iframe'?'https://provider.com/embed/xxxx':'https://.../video.mp4  or  .../stream.m3u8'}" value="${esc(src.url)}" style="margin-top:8px;">
+    </div>`;
+}
+function sourceHelpText(kind){
+  if(currentLang()==='ar'){
+    return kind==='iframe'
+      ? 'يوفّر عليك المساحة والوقت — لا حاجة لرفع أي ملف، فقط ألصق رابط تضمين (Embed/iframe) من السيرفر الجاهز.'
+      : 'ألصق رابط ملف فيديو مباشر (.mp4) أو رابط بث تكيّفي (.m3u8/HLS) من استضافتك الخاصة أو مصدر تملك حق استخدامه.';
+  }
+  return kind==='iframe'
+    ? 'Saves time and storage — no upload needed, just paste the embed/iframe URL from your existing server.'
+    : 'Paste a direct video file (.mp4) or adaptive stream (.m3u8/HLS) URL from your own hosting or a source you have rights to use.';
+}
+function setSourceKind(kind){
+  formState.source = formState.source || {kind:'iframe',url:''};
+  formState.source.kind = kind;
+  renderForm();
+}
+
+function seriesSeasonsFormHtml(f){
+  return `
+    <div class="field">
+      <label>${t('seasons')} & ${t('episodes')}</label>
+      <div id="seasonsBuilder">${f.seasons.map((s,si)=>seasonBlockHtml(s,si)).join('')}</div>
+      <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="addSeason()">+ ${t('season')}</button>
+    </div>`;
+}
+function seasonBlockHtml(season, si){
+  return `
+    <div class="season-block">
+      <div class="season-block-head">
+        <b>${t('season')} ${season.number}</b>
+        <div style="display:flex;gap:8px;">
+          <button class="link-btn" onclick="addEpisode(${si})">+ ${currentLang()==='ar'?'حلقة':'Episode'}</button>
+          <button class="link-btn danger" onclick="removeSeason(${si})">${t('delete')}</button>
+        </div>
+      </div>
+      ${season.episodes.map((ep,ei)=>episodeMiniHtml(season,si,ep,ei)).join('')}
+      ${!season.episodes.length ? `<div class="help-text">${currentLang()==='ar'?'لا حلقات بعد':'No episodes yet'}</div>`:''}
+    </div>`;
+}
+function episodeMiniHtml(season,si,ep,ei){
+  return `
+    <div class="ep-mini">
+      <span style="width:24px;color:var(--muted);">${ep.number}</span>
+      <input type="text" placeholder="Episode title" value="${esc(ep.title)}" oninput="updateEp(${si},${ei},'title',this.value)">
+      <select onchange="updateEp(${si},${ei},'sourceKind',this.value)" style="width:110px;">
+        <option value="iframe" ${ep.source&&ep.source.kind==='iframe'?'selected':''}>Iframe</option>
+        <option value="video" ${ep.source&&ep.source.kind==='video'?'selected':''}>MP4/M3U8</option>
+      </select>
+      <input type="url" placeholder="Video URL" value="${esc(ep.source?ep.source.url:'')}" oninput="updateEp(${si},${ei},'sourceUrl',this.value)" style="flex:2;">
+      <button class="link-btn danger" onclick="removeEpisode(${si},${ei})">&#10005;</button>
+    </div>`;
+}
+function addSeason(){
+  const nextNum = Math.max(0,...formState.seasons.map(s=>s.number))+1;
+  formState.seasons.push({number:nextNum, episodes:[]});
+  renderForm();
+}
+function removeSeason(si){ formState.seasons.splice(si,1); renderForm(); }
+function addEpisode(si){
+  const season = formState.seasons[si];
+  const nextNum = Math.max(0,...season.episodes.map(e=>e.number))+1;
+  season.episodes.push({id:'ep_'+Date.now()+'_'+nextNum, number:nextNum, title:'', titleAr:'', description:'', descriptionAr:'', thumbnail:formState.backdrop||'', runtime:24, releaseDate:'', source:{kind:'iframe',url:''}});
+  renderForm();
+}
+function removeEpisode(si,ei){ formState.seasons[si].episodes.splice(ei,1); renderForm(); }
+function updateEp(si,ei,field,val){
+  const ep = formState.seasons[si].episodes[ei];
+  if(field==='title'){ ep.title=val; ep.titleAr = ep.titleAr||val; }
+  else if(field==='sourceKind'){ ep.source = ep.source||{}; ep.source.kind=val; }
+  else if(field==='sourceUrl'){ ep.source = ep.source||{}; ep.source.url=val; }
+}
+
+function openModalCustom(html, lg){
+  openModal(html, {lg:!!lg});
+}
+
+function saveTitleForm(){
+  const f = formState;
+  f.title = document.getElementById('fld_title').value.trim() || 'Untitled';
+  f.titleAr = document.getElementById('fld_titleAr').value.trim() || f.title;
+  f.originalTitle = f.title;
+  f.year = parseInt(document.getElementById('fld_year').value,10) || new Date().getFullYear();
+  f.ageRating = document.getElementById('fld_age').value;
+  f.description = document.getElementById('fld_desc').value.trim();
+  f.descriptionAr = document.getElementById('fld_descAr').value.trim() || f.description;
+  f.poster = document.getElementById('fld_poster').value.trim();
+  f.backdrop = document.getElementById('fld_backdrop').value.trim();
+  f.cast = document.getElementById('fld_cast').value.split(',').map(s=>s.trim()).filter(Boolean);
+  f.rating = f.rating || 7.5;
+
+  if(f.type==='movie'){
+    f.runtime = parseInt(document.getElementById('fld_runtime').value,10) || 90;
+    f.director = document.getElementById('fld_directorcreator').value.trim();
+    f.source = f.source || {kind:'iframe',url:''};
+    f.source.url = document.getElementById('fld_sourceUrl').value.trim();
+  } else {
+    f.creator = document.getElementById('fld_directorcreator').value.trim();
+  }
+
+  if(!f.poster || !f.backdrop){
+    showToast(currentLang()==='ar' ? 'يرجى إضافة روابط الصورة والخلفية' : 'Please add poster and backdrop URLs');
+    return;
+  }
+
+  DB.upsertTitle(f);
+  closeModal();
+  renderAll();
+  showToast(currentLang()==='ar' ? 'تم الحفظ' : 'Saved');
+}
+
+renderAll();
+</script>
+</body>
+</html>

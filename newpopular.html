@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>RIOFLIX</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="page-wrap">
+  <h1 class="page-title" id="pageTitle"></h1>
+  <div id="rowsHolder"></div>
+</div>
+<script src="js/db.js"></script>
+<script src="js/i18n.js"></script>
+<script src="js/ui.js"></script>
+<script>
+const profile = bootPage('newpopular');
+function render(){
+  document.getElementById('pageTitle').textContent = t('newPopular');
+  const all = DB.getTitles();
+  const holder = document.getElementById('rowsHolder');
+  renderRow(holder, t('trendingNow'), [...all].sort(()=>Math.random()-0.5));
+  renderRow(holder, t('newOnRioflix'), [...all].sort((a,b)=>b.year-a.year));
+  renderRow(holder, t('recentlyAdded'), [...all].reverse());
+  renderRow(holder, currentLang()==='ar'?'الأعلى تقييمًا':'Top Rated', [...all].sort((a,b)=>b.rating-a.rating));
+  renderFooter();
+}
+if(profile) render();
+</script>
+</body>
+</html>

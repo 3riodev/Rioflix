@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>RIOFLIX — Search</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="search-hero">
+  <div class="search-input-wrap">
+    <span>&#128269;</span>
+    <input type="text" id="searchInput" autofocus>
+  </div>
+</div>
+<div class="page-wrap" style="padding-top:20px;">
+  <div class="grid" id="grid"></div>
+</div>
+
+<script src="js/db.js"></script>
+<script src="js/i18n.js"></script>
+<script src="js/ui.js"></script>
+<script>
+const profile = bootPage('search');
+document.getElementById('searchInput').placeholder = t('searchPlaceholder');
+
+// Basic Arabic/English cross-matching: transliteration map for a handful of
+// common Arabic-script renderings so "سبايدر" style queries can still surface
+// Latin-titled results even without exact metadata overlap.
+const AR_EN_HINTS = [
+  [/سبايدر ?مان/, 'spider-man'], [/باتمان/, 'batman'], [/سوبرمان/, 'superman'],
+  [/افاتار/, 'avatar'], [/سينتل/, 'sintel'], [/فولاذ/, 'steel'], [/الأفيال|الافيال/, 'elephant'],
+  [/باني|أرنب/, 'bunny'],
+];
+
+function render(){
+  const q = document.getElementById('searchInput').value;
+  const grid = document.getElementById('grid');
+  if(!q.trim()){ grid.innerHTML=''; return; }
+  let results = DB.search(q);
+  if(!results.length){
+    const lower = q.toLowerCase();
+    for(const [pattern, enTerm] of AR_EN_HINTS){
+      if(pattern.test(lower) || lower.includes(enTerm)){
+        results = DB.search(enTerm);
+        if(results.length) break;
+      }
+    }
+  }
+  grid.innerHTML = results.length ? results.map(tt=>cardHtml(tt)).join('') : emptyStateHtml(t('noResults'), t('noResultsSub'));
+}
+let debounce;
+document.getElementById('searchInput').addEventListener('input', ()=>{ clearTimeout(debounce); debounce=setTimeout(render,150); });
+if(profile) renderFooter();
+</script>
+</body>
+</html>

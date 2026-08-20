@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>RIOFLIX Player</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+</head>
+<body>
+<div class="player-page" id="playerPage">
+  <div class="player-media-wrap" id="mediaWrap"></div>
+
+  <div class="player-topbar" id="topbar">
+    <button class="player-btn" onclick="goBack()">&#8592;</button>
+    <div class="ep-title"><b id="topTitle"></b><span id="topSub"></span></div>
+  </div>
+
+  <div id="centerPlayBtn"></div>
+  <div id="iframeNote"></div>
+
+  <div class="player-controls" id="nativeControls" style="display:none;">
+    <div class="seek-bar" id="seekBar" onclick="seekClick(event)">
+      <div class="seek-buffer" id="seekBuffer" style="width:0%"></div>
+      <div class="seek-fill" id="seekFill" style="width:0%"></div>
+    </div>
+    <div class="controls-row">
+      <div class="controls-left">
+        <button class="player-btn" onclick="togglePlay()" id="playBtn">&#10074;&#10074;</button>
+        <button class="player-btn" onclick="skip(-10)" title="-10s">&#8634;10</button>
+        <button class="player-btn" onclick="skip(10)" title="+10s">&#8635;10</button>
+        <button class="player-btn" onclick="toggleMute()" id="muteBtn">&#128266;</button>
+        <span class="time-label" id="timeLabel">0:00 / 0:00</span>
+      </div>
+      <div class="controls-right">
+        <button class="player-btn" onclick="prevEpisode()" id="prevBtn" style="display:none;">&#9198;</button>
+        <button class="player-btn" onclick="nextEpisodeNow()" id="nextBtn" style="display:none;">&#9197;</button>
+        <button class="player-btn" onclick="toggleSettings()">&#9881;</button>
+        <button class="player-btn" onclick="togglePiP()" title="PiP">&#128470;</button>
+        <button class="player-btn" onclick="toggleFullscreen()">&#9974;</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="settingsPanel" style="display:none;"></div>
+  <div id="nextEpToast" style="display:none;"></div>
+</div>
+
+<script src="js/db.js"></script>
+<script src="js/i18n.js"></script>
+<script>
+DB.init(); applyDirection();
+const profile = DB.getActiveProfile();
+if(!profile) location.href='profiles.html';
+
+const params = new URLSearchParams(location.search);
+const titleId = params.get('id');
+const seasonNum = params.get('s') ? parseInt(params.get('s'),10) : null;
+const epNum = params.get('e') ? parseInt(params.get('e'),10) : null;
+
+let tt, currentEp=null, currentSeason=null, hlsInstance=null, videoEl=null, idleTimer=null, autoPlayNext=true;
+
+function goBack(){ history.length>1 ? history.back() : location.href='title.html?id='+titleId; }
+
+function init(){
+  tt = DB.getTitle(titleId);
+  if(!tt){ document.getElementById('mediaWrap').innerHTML = `<div style="color:#fff;padding:40px;">${t('errorGeneric')}</div>`; return; }
+
+  let source, epLabel='', title=titleDisplayNameLocal(tt);
+  if(tt.type==='series'){
+    currentSeason = tt.seasons.find(s=>s.number===(seasonNum||tt.seasons[0].number));
+    currentEp = currentSeason.episodes.find(e=>e.number===(epNum||currentSeason.episodes[0].number)) || currentSeason.episodes[0];
+    source = currentEp.source;
+    epLabel = ` — S${currentSeason.number} E${currentEp.number} · ${(currentLang()==='ar'&&currentEp.titleAr)?currentEp.titleAr:currentEp.title}`;
+  } else {
+    source = tt.source;
+  }
+  document.getElementById('topTitle').textContent = title;
+  document.getElementById('topSub').textContent = epLabel;
+
+  loadSource(source);
+  setupIdleHide();
+}
+function titleDisplayNameLocal(tt){ return (currentLang()==='ar'&&tt.titleAr)?tt.titleAr:tt.title; }
+
+function loadSource(source){
+  const wrap = document.getElementById('mediaWrap');
+  wrap.innerHTML='';
+  document.getElementById('nativeControls').style.display='none';
+  document.getElementById('iframeNote').innerHTML='';
+  document.getElementById('centerPlayBtn').innerHTML='';
+
+  if(!source || !source.url){
+    wrap.innerHTML = `<div style="color:#fff;padding:60px;text-align:center;">${t('errorGeneric')}</div>`;
+    return;
+  }
+
+  if(source.kind==='iframe'){
+    const iframe = document.createElement('iframe');
+    iframe.src = source.url;
+    iframe.allow = 'autoplay; fullscreen; picture-in-picture; encrypted-media';
+    iframe.allowFullscreen = true;
+    wrap.appendChild(iframe);
+    document.getElementById('iframeNote').innerHTML = `<div class="iframe-note">${currentLang()==='ar'?'مصدر خارجي مضمّن (Iframe)':'External embedded source (Iframe)'}</div>`;
+    return;
+  }
+
+  // native video (mp4 / m3u8)
+  videoEl = document.createElement('video');
+  videoEl.setAttribute('playsinline','');
+  videoEl.autoplay = true;
+  wrap.appendChild(videoEl);
+  document.getElementById('nativeControls').style.display='block';
+
+  (source.subtitles||[]).forEach(sub=>{
+    const track = document.createElement('track');
+    track.kind='subtitles'; track.label=sub.label||sub.lang; track.srclang=sub.lang; track.src=sub.url;
+    videoEl.appendChild(track);
+  });
+
+  const url = source.url;
+  if(url.includes('.m3u8') && window.Hls && Hls.isSupported()){
+    hlsInstance = new Hls();
+    hlsInstance.loadSource(url);
+    hlsInstance.attachMedia(videoEl);
+  } else {
+    videoEl.src = url;
+  }
+
+  const prog = DB.getProgress(titleId);
+  if(prog && (!currentEp || (prog.season===currentSeason.number && prog.episode===currentEp.number)) && prog.time>3){
+    videoEl.addEventListener('loadedmetadata', ()=>{ videoEl.currentTime = prog.time; }, {once:true});
+  }
+
+  videoEl.addEventListener('play', ()=>{ document.getElementById('playBtn').innerHTML='&#10074;&#10074;'; });
+  videoEl.addEventListener('pause', ()=>{ document.getElementById('playBtn').innerHTML='&#9654;'; });
+  videoEl.addEventListener('timeupdate', onTimeUpdate);
+  videoEl.addEventListener('progress', updateBuffer);
+  videoEl.addEventListener('ended', onEnded);
+  videoEl.addEventListener('click', togglePlay);
+
+  updateEpNavButtons();
+}
+
+let saveTimer=null;
+function onTimeUpdate(){
+  if(!videoEl || !videoEl.duration) return;
+  const pct = (videoEl.currentTime/videoEl.duration)*100;
+  document.getElementById('seekFill').style.width = pct+'%';
+  document.getElementById('timeLabel').textContent = fmtTime(videoEl.currentTime)+' / '+fmtTime(videoEl.duration);
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(()=>{
+    DB.saveProgress(titleId, {
+      time:videoEl.currentTime, duration:videoEl.duration,
+      season: currentSeason?currentSeason.number:null, episode: currentEp?currentEp.number:null
+    });
+  }, 800);
+  // show "next episode" prompt in last 15s of an episode
+  if(tt.type==='series' && videoEl.duration - videoEl.currentTime < 15 && videoEl.duration - videoEl.currentTime > 0){
+    maybeShowNextPrompt();
+  }
+}
+function updateBuffer(){
+  if(!videoEl || !videoEl.buffered.length || !videoEl.duration) return;
+  const end = videoEl.buffered.end(videoEl.buffered.length-1);
+  document.getElementById('seekBuffer').style.width = (end/videoEl.duration*100)+'%';
+}
+function fmtTime(s){
+  s = Math.floor(s||0);
+  const m = Math.floor(s/60), sec = s%60;
+  return m+':'+(sec<10?'0':'')+sec;
+}
+function togglePlay(){ if(!videoEl) return; videoEl.paused ? videoEl.play() : videoEl.pause(); }
+function skip(sec){ if(videoEl) videoEl.currentTime += sec; }
+function toggleMute(){ if(!videoEl) return; videoEl.muted=!videoEl.muted; document.getElementById('muteBtn').innerHTML = videoEl.muted?'&#128263;':'&#128266;'; }
+function seekClick(e){
+  if(!videoEl || !videoEl.duration) return;
+  const bar = document.getElementById('seekBar');
+  const rect = bar.getBoundingClientRect();
+  let pct = (e.clientX-rect.left)/rect.width;
+  if(document.documentElement.dir==='rtl') pct = 1-pct;
+  videoEl.currentTime = pct*videoEl.duration;
+}
+function toggleFullscreen(){
+  const el = document.getElementById('playerPage');
+  if(!document.fullscreenElement) el.requestFullscreen && el.requestFullscreen();
+  else document.exitFullscreen && document.exitFullscreen();
+}
+function togglePiP(){
+  if(videoEl && document.pictureInPictureEnabled){
+    if(document.pictureInPictureElement) document.exitPictureInPicture();
+    else videoEl.requestPictureInPicture().catch(()=>{});
+  }
+}
+function toggleSettings(){
+  const panel = document.getElementById('settingsPanel');
+  if(panel.style.display==='block'){ panel.style.display='none'; return; }
+  panel.innerHTML = `
+    <div class="settings-panel" style="display:block;">
+      <h4>${t('quality')}</h4>
+      <div class="opt active" onclick="showToastLocal()">Auto</div>
+      <h4>Playback Speed</h4>
+      ${[0.5,1,1.25,1.5,2].map(r=>`<div class="opt ${videoEl&&videoEl.playbackRate===r?'active':''}" onclick="setRate(${r})">${r}x</div>`).join('')}
+      <h4>${t('subtitles')}</h4>
+      <div class="opt active" onclick="toggleSubs()">${currentLang()==='ar'?'العربية':'English'}</div>
+      <div class="opt" onclick="toggleSubs(true)">${currentLang()==='ar'?'إيقاف':'Off'}</div>
+    </div>`;
+  panel.style.display='block';
+}
+function setRate(r){ if(videoEl) videoEl.playbackRate=r; toggleSettings(); toggleSettings(); }
+function toggleSubs(off){
+  if(!videoEl) return;
+  const tracks = videoEl.textTracks;
+  for(let i=0;i<tracks.length;i++){ tracks[i].mode = off ? 'disabled' : 'showing'; }
+  document.getElementById('settingsPanel').style.display='none';
+}
+function showToastLocal(){ document.getElementById('settingsPanel').style.display='none'; }
+
+// idle-hide controls
+function setupIdleHide(){
+  const page = document.getElementById('playerPage');
+  const reset = ()=>{
+    page.classList.remove('idle');
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(()=>page.classList.add('idle'), 3000);
+  };
+  ['mousemove','touchstart','click'].forEach(ev=>page.addEventListener(ev,reset));
+  reset();
+}
+
+function updateEpNavButtons(){
+  if(tt.type!=='series') return;
+  const eps = currentSeason.episodes;
+  const idx = eps.findIndex(e=>e.number===currentEp.number);
+  document.getElementById('prevBtn').style.display = idx>0 ? 'inline-flex':'none';
+  document.getElementById('nextBtn').style.display = (idx<eps.length-1) ? 'inline-flex':'none';
+}
+function prevEpisode(){
+  const eps = currentSeason.episodes;
+  const idx = eps.findIndex(e=>e.number===currentEp.number);
+  if(idx>0) location.href = `player.html?id=${titleId}&s=${currentSeason.number}&e=${eps[idx-1].number}`;
+}
+function nextEpisodeNow(){
+  const nxt = getNextEpisode();
+  if(nxt) location.href = `player.html?id=${titleId}&s=${nxt.s}&e=${nxt.e}`;
+}
+function getNextEpisode(){
+  const eps = currentSeason.episodes;
+  const idx = eps.findIndex(e=>e.number===currentEp.number);
+  if(idx<eps.length-1) return {s:currentSeason.number, e:eps[idx+1].number};
+  const sIdx = tt.seasons.findIndex(s=>s.number===currentSeason.number);
+  if(sIdx<tt.seasons.length-1){
+    const nextSeason = tt.seasons[sIdx+1];
+    return {s:nextSeason.number, e:nextSeason.episodes[0].number};
+  }
+  return null;
+}
+let nextPromptShown=false, countdownTimer=null;
+function maybeShowNextPrompt(){
+  if(nextPromptShown) return;
+  const nxt = getNextEpisode();
+  if(!nxt) return;
+  nextPromptShown = true;
+  const nextTt = tt.seasons.find(s=>s.number===nxt.s).episodes.find(e=>e.number===nxt.e);
+  let count = 5;
+  const toast = document.getElementById('nextEpToast');
+  const render = ()=>{
+    toast.innerHTML = `<div class="next-ep-toast" style="display:block;">
+      <div class="nt-title">${t('nextEpisodeIn')} ${count}…</div>
+      <div class="nt-name">${(currentLang()==='ar'&&nextTt.titleAr)?nextTt.titleAr:nextTt.title}</div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-primary btn-sm" onclick="goNextNow()">${t('playNow')}</button>
+        <button class="btn btn-ghost btn-sm" onclick="cancelNext()">${t('cancel')}</button>
+      </div></div>`;
+  };
+  render();
+  countdownTimer = setInterval(()=>{
+    count--;
+    if(count<=0){ clearInterval(countdownTimer); if(autoPlayNext) goNextNow(); else cancelNext(); return; }
+    render();
+  },1000);
+}
+function goNextNow(){ clearInterval(countdownTimer); const nxt=getNextEpisode(); if(nxt) location.href = `player.html?id=${titleId}&s=${nxt.s}&e=${nxt.e}`; }
+function cancelNext(){ clearInterval(countdownTimer); document.getElementById('nextEpToast').innerHTML=''; }
+function onEnded(){
+  DB.saveProgress(titleId, {time:videoEl.duration, duration:videoEl.duration, season:currentSeason?currentSeason.number:null, episode:currentEp?currentEp.number:null});
+  if(tt.type!=='series' || nextPromptShown) return;
+  const nxt = getNextEpisode();
+  if(nxt) goNextNow();
+}
+
+// keyboard shortcuts
+document.addEventListener('keydown',(e)=>{
+  if(e.code==='Space'){ e.preventDefault(); togglePlay(); }
+  if(e.code==='ArrowRight'){ skip(10); }
+  if(e.code==='ArrowLeft'){ skip(-10); }
+  if(e.code==='KeyF'){ toggleFullscreen(); }
+  if(e.code==='KeyM'){ toggleMute(); }
+});
+
+window.addEventListener('beforeunload', ()=>{
+  if(videoEl && videoEl.duration){
+    DB.saveProgress(titleId, {time:videoEl.currentTime, duration:videoEl.duration, season:currentSeason?currentSeason.number:null, episode:currentEp?currentEp.number:null});
+  }
+});
+
+init();
+</script>
+</body>
+</html>

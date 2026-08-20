@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>RIOFLIX — Who's watching?</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="profiles-screen">
+  <div class="brand" style="font-size:34px;margin-bottom:30px;">RIOFLIX</div>
+  <h1 id="pageHeading">Who's watching?</h1>
+  <div class="profiles-grid" id="profilesGrid"></div>
+</div>
+
+<script src="js/db.js"></script>
+<script src="js/i18n.js"></script>
+<script>
+DB.init();
+applyDirection();
+
+function initial(name){ return (name||'?').trim().charAt(0).toUpperCase(); }
+
+function render(){
+  document.getElementById('pageHeading').textContent = t('whosWatching');
+  const grid = document.getElementById('profilesGrid');
+  const profiles = DB.getProfiles();
+  grid.innerHTML = profiles.map(p=>`
+    <div class="profile-item" onclick="selectProfile('${p.id}')">
+      <div class="profile-avatar" style="background:${p.avatarColor};color:#000;">
+        ${initial(p.name)}
+        ${p.kids?`<span class="profile-kids-tag">KIDS</span>`:''}
+        ${p.pin?`<span class="profile-lock" style="display:none;">&#128274;</span>`:''}
+      </div>
+      <div class="profile-name">${p.name}</div>
+    </div>
+  `).join('') + `
+    <div class="profile-item add-profile" onclick="openAddProfile()">
+      <div class="profile-avatar">&#65291;</div>
+      <div class="profile-name">${t('addProfile')}</div>
+    </div>`;
+
+  // long-press / right area to edit: add small edit affordance under each profile
+  grid.querySelectorAll('.profile-item').forEach((el,i)=>{
+    if(i>=profiles.length) return;
+    const p = profiles[i];
+    const editBtn = document.createElement('div');
+    editBtn.textContent = t('edit');
+    editBtn.style.cssText='font-size:11px;color:var(--muted2);margin-top:-4px;text-decoration:underline;cursor:pointer;';
+    editBtn.onclick = (e)=>{ e.stopPropagation(); openEditProfile(p.id); };
+    el.appendChild(editBtn);
+  });
+}
+
+function selectProfile(id){
+  const p = DB.getProfile(id);
+  if(p.pin){
+    promptPin(p);
+    return;
+  }
+  DB.setActiveProfile(id);
+  location.href='home.html';
+}
+
+function promptPin(p){
+  openModal(`
+    <h2>${t('pin')}</h2>
+    <div class="field"><input type="password" id="pinInput" maxlength="4" placeholder="••••" autofocus></div>
+    <div id="pinErr" style="color:var(--danger);font-size:13px;display:none;">—</div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">${t('cancel')}</button>
+      <button class="btn btn-primary" onclick="checkPin('${p.id}')">${t('play')==='Play'?'Unlock':'دخول'}</button>
+    </div>`);
+}
+function checkPin(id){
+  const p = DB.getProfile(id);
+  const val = document.getElementById('pinInput').value;
+  if(val===p.pin){ DB.setActiveProfile(id); location.href='home.html'; }
+  else { document.getElementById('pinErr').style.display='block'; document.getElementById('pinErr').textContent = currentLang()==='ar'?'رمز غير صحيح':'Incorrect PIN'; }
+}
+
+function openAddProfile(){ openEditProfile(null); }
+
+function openEditProfile(id){
+  const p = id ? DB.getProfile(id) : DB.newProfileTemplate('');
+  const isNew = !id;
+  openModal(`
+    <h2>${isNew? t('addProfile') : t('edit')}</h2>
+    <div class="field"><label>${t('addName')}</label><input type="text" id="fName" value="${p.name||''}"></div>
+    <div class="field-row">
+      <div class="field"><label>${t('language')}</label>
+        <select id="fLang"><option value="ar" ${p.lang==='ar'?'selected':''}>العربية</option><option value="en" ${p.lang==='en'?'selected':''}>English</option></select>
+      </div>
+      <div class="field"><label>${t('pin')} (${currentLang()==='ar'?'اختياري':'optional'})</label><input type="password" id="fPin" maxlength="4" value="${p.pin||''}"></div>
+    </div>
+    <div class="field">
+      <label><input type="checkbox" id="fKids" ${p.kids?'checked':''}> ${t('kidsMode')}</label>
+    </div>
+    <div class="modal-actions">
+      ${!isNew?`<button class="btn btn-ghost" style="color:var(--danger);margin-inline-end:auto;" onclick="deleteProfileConfirm('${p.id}')">${t('delete')}</button>`:''}
+      <button class="btn btn-ghost" onclick="closeModal()">${t('cancel')}</button>
+      <button class="btn btn-primary" onclick="saveProfile('${isNew?'':p.id}')">${t('save')}</button>
+    </div>`);
+}
+function saveProfile(id){
+  const name = document.getElementById('fName').value.trim() || 'Profile';
+  const lang = document.getElementById('fLang').value;
+  const pin = document.getElementById('fPin').value.trim();
+  const kids = document.getElementById('fKids').checked;
+  let p;
+  if(id){ p = DB.getProfile(id); }
+  else { p = DB.newProfileTemplate(name); }
+  p.name=name; p.lang=lang; p.pin=pin; p.kids=kids;
+  DB.upsertProfile(p);
+  closeModal();
+  render();
+}
+function deleteProfileConfirm(id){
+  if(DB.getProfiles().length<=1){ showToastLocal(currentLang()==='ar'?'يجب وجود ملف شخصي واحد على الأقل':'At least one profile is required'); return; }
+  if(confirm(currentLang()==='ar'?'حذف هذا الملف الشخصي؟':'Delete this profile?')){
+    DB.deleteProfile(id);
+    closeModal();
+    render();
+  }
+}
+function showToastLocal(msg){ alert(msg); }
+</script>
+<script src="js/ui.js"></script>
+<script>render();</script>
+</body>
+</html>
